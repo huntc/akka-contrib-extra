@@ -29,29 +29,43 @@ class ORMultiMap private (private[akka] val map: ORMap)
   def get(key: String): Option[ORSet] =
     map.get(key).asInstanceOf[Option[ORSet]]
 
-  def addBinding(key: String, element: Any)(implicit cluster: Cluster): ORMultiMap = {
-    val values = updateOrInit(key, _ + element, ORSet.empty + element)
-    ORMultiMap(map + (key -> values))
+  def +(entry: (String, ORSet))(implicit node: Cluster): ORMultiMap = {
+    val (key, value) = entry
+    put(node, key, value)
   }
 
-  def removeBinding(key: String, element: Any)(implicit cluster: Cluster): ORMultiMap = {
-    val values = updateOrInit(key, _ - element, ORSet.empty)
-    if (values.value.nonEmpty)
-      ORMultiMap(map + (key -> values))
-    else
-      ORMultiMap(map - key)
+  def put(node: Cluster, key: String, value: ORSet): ORMultiMap =
+    put(node.selfUniqueAddress, key, value)
+
+  private[akka] def put(node: UniqueAddress, key: String, value: ORSet): ORMultiMap =
+    ORMultiMap(map.put(node, key, value))
+
+  def -(key: String)(implicit node: Cluster): ORMultiMap =
+    remove(node, key)
+
+  def remove(node: Cluster, key: String): ORMultiMap =
+    remove(node.selfUniqueAddress, key)
+
+  private[akka] def remove(node: UniqueAddress, key: String): ORMultiMap =
+    ORMultiMap(map.remove(node, key))
+
+  def addBinding(key: String, element: Any)(implicit cluster: Cluster): ORMultiMap =
+    addBinding(cluster.selfUniqueAddress, key, element)
+
+  private[akka] def addBinding(node: UniqueAddress, key: String, element: Any): ORMultiMap = {
+    val values = updateOrInit(key, _.add(node, element), ORSet.empty.add(node, element))
+    ORMultiMap(map.put(node, key, values))
   }
 
-  def removeBindings(key: String, p: Any => Boolean)(implicit cluster: Cluster): ORMultiMap = {
-    val values = updateOrInit(
-      key,
-      values => (values /: values.value)((vs, e) => if (p(e)) vs - e else vs),
-      ORSet.empty
-    )
+  def removeBinding(key: String, element: Any)(implicit cluster: Cluster): ORMultiMap =
+    removeBinding(cluster.selfUniqueAddress, key, element)
+
+  private[akka] def removeBinding(node: UniqueAddress, key: String, element: Any): ORMultiMap = {
+    val values = updateOrInit(key, _.remove(node, element), ORSet.empty)
     if (values.value.nonEmpty)
-      ORMultiMap(map + (key -> values))
+      ORMultiMap(map.put(node, key, values))
     else
-      ORMultiMap(map - key)
+      ORMultiMap(map.remove(node, key))
   }
 
   private def updateOrInit(key: String, update: ORSet => ORSet, init: => ORSet): ORSet =
